@@ -1,0 +1,89 @@
+# OmniScrape Engine - Docker Compose Configuration
+# Includes application, Redis cache, and optional monitoring
+
+version: '3.8'
+
+services:
+  # Main OmniScrape API
+  omniscrape:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: omniscrape-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - APP_ENV=production
+      - LOG_LEVEL=INFO
+      - REDIS_URL=redis://redis:6379/0
+      - MAX_CONCURRENT_SERP_SCRAPES=60
+      - MAX_CONCURRENT_DEEP_SCRAPES=30
+      - HEADLESS_MODE=true
+      - STEALTH_MODE=true
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - omniscrape-network
+    deploy:
+      resources:
+        limits:
+          cpus: '4'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    container_name: omniscrape-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    networks:
+      - omniscrape-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Redis Commander for Redis management UI
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: omniscrape-redis-commander
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - REDIS_HOSTS=local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - omniscrape-network
+    profiles:
+      - dev
+
+networks:
+  omniscrape-network:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
